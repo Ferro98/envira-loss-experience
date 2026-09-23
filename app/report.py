@@ -2,7 +2,7 @@
 
 import pandas as pd
 
-from app.data import INCURRED_STATUSES, Book
+from app.data import Book
 
 
 def loss_experience(book: Book, portfolio_id: str) -> dict | None:
@@ -27,7 +27,7 @@ def _summarise(policies: pd.DataFrame, claims: pd.DataFrame) -> dict:
     premium = float(policies["premium_dkk"].sum())
     incurred = float(claims["incurred_dkk"].sum())
     # Withdrawn and declined claims cost nothing, so they are not counted as claims.
-    counted = claims[claims["status"].isin(INCURRED_STATUSES)]
+    counted = claims[claims["status"].isin(["settled", "open"])]
     return {
         "policy_count": int(policies["policy_id"].nunique()),
         "earned_premium": round(premium, 2),

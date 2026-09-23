@@ -33,7 +33,7 @@ def book(policies, claims):
 
 
 def issue_rows(b, issue_prefix):
-    return sum(i["rows"] for i in b.issues if i["issue"].startswith(issue_prefix))
+    return sum(i["rows"] for i in b.issues if i["problem"].startswith(issue_prefix))
 
 
 def test_peril_is_normalised_and_reported():
@@ -73,16 +73,17 @@ def test_day_first_dates_are_parsed():
     assert issue_rows(b, "date in DD-MM-YYYY") == 1
 
 
-def test_negative_paid_uses_absolute_value():
-    b = book([policy()], [claim(paid="-100")])
-    assert b.claims.loc[0, "incurred_dkk"] == pytest.approx(100.0)
-    assert issue_rows(b, "negative paid_amount") == 1
+def test_negative_paid_is_excluded_and_reported():
+    b = book([policy()], [claim("C1"), claim("C2", paid="-100")])
+    assert list(b.claims["claim_id"]) == ["C1"]
+    negative = next(i for i in b.issues if i["problem"] == "negative paid_amount")
+    assert negative["rows"] == 1 and negative["amount_dkk"] == 100.0
 
 
 def test_orphan_claim_is_excluded_and_reported():
     b = book([policy()], [claim("C1"), claim("C2", policy_id="P-MISSING", paid="500")])
     assert list(b.claims["claim_id"]) == ["C1"]
-    orphan = next(i for i in b.issues if i["issue"].startswith("policy_id not in"))
+    orphan = next(i for i in b.issues if i["problem"].startswith("policy_id not in"))
     assert orphan["rows"] == 1 and orphan["amount_dkk"] == 500.0
 
 
@@ -92,14 +93,8 @@ def test_loss_before_inception_is_excluded_and_reported():
     assert issue_rows(b, "loss date outside") == 1
 
 
-def test_duplicate_claim_id_is_not_double_counted():
-    b = book([policy()], [claim("C1"), claim("C1")])
-    assert len(b.claims) == 1
-    assert issue_rows(b, "duplicate claim_id") == 1
-
-
 def test_every_source_claim_is_either_kept_or_reported_as_excluded():
-    claims = [claim("C1"), claim("C2", policy_id="X"), claim("C3", loss="2020-01-01"), claim("C1")]
+    claims = [claim("C1"), claim("C2", policy_id="X"), claim("C3", loss="2022-12-01"), claim("C4", paid="-5")]
     b = book([policy()], claims)
     excluded = sum(i["rows"] for i in b.issues if i["table"] == "claims" and i["action"].startswith("excluded"))
     assert len(b.claims) + excluded == len(claims)

@@ -1,145 +1,143 @@
 """Load the source CSVs and apply the data-handling policy.
 
-Every row that is excluded or corrected is counted in `Book.issues`, so the
-data-quality report can say exactly what happened to the source data.
+Every row that is corrected or excluded is recorded in `Book.issues`,
+so the data-quality report can say exactly what happened to the source data.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
 
-INCURRED_STATUSES = {"settled", "open"}
-ZERO_COST_STATUSES = {"withdrawn", "declined"}
-
 
 @dataclass
 class Book:
-    policies: pd.DataFrame  # one row per valid policy, with portfolio and premium_dkk
-    claims: pd.DataFrame  # one row per valid claim, with policy fields and incurred_dkk
-    issues: list[dict] = field(default_factory=list)
+    policies: pd.DataFrame  # valid policies, with portfolio_id and premium_dkk
+    claims: pd.DataFrame  # valid claims, with policy fields and incurred_dkk
+    issues: list[dict]  # what was corrected or excluded, and how many rows
 
 
 def load_book(data_dir: str | Path) -> Book:
     data_dir = Path(data_dir)
-    read = lambda name: pd.read_csv(data_dir / f"{name}.csv", dtype=str)
-    return build_book(read("assets"), read("policies"), read("claims"), read("fx_rates"))
+    assets = pd.read_csv(data_dir / "assets.csv")
+    policies = pd.read_csv(data_dir / "policies.csv")
+    claims = pd.read_csv(data_dir / "claims.csv")
+    fx = pd.read_csv(data_dir / "fx_rates.csv")
+    return build_book(assets, policies, claims, fx)
 
 
-def build_book(assets: pd.DataFrame, policies: pd.DataFrame, claims: pd.DataFrame, fx: pd.DataFrame) -> Book:
-    issues: list[dict] = []
-
-    def record(table: str, issue: str, action: str, mask: pd.Series, amount_dkk: float | None = None) -> None:
-        count = int(mask.sum())
-        if count:
-            entry = {"table": table, "issue": issue, "action": action, "rows": count}
-            if amount_dkk is not None:
-                entry["amount_dkk"] = round(float(amount_dkk), 2)
-            issues.append(entry)
-
-    rates = _rate_lookup(fx)
-    policies = _clean_policies(assets, policies, rates, record)
-    claims = _clean_claims(claims, policies, rates, record)
+def build_book(assets, policies, claims, fx) -> Book:
+    issues = []
+    fx = fx.astype({"rate_dkk_per_unit": float})
+    policies = clean_policies(policies, assets, fx, issues)
+    claims = clean_claims(claims, policies, fx, issues)
     return Book(policies=policies, claims=claims, issues=issues)
 
 
-def _rate_lookup(fx: pd.DataFrame) -> dict[tuple[str, str], float]:
-    fx = fx.assign(rate=pd.to_numeric(fx["rate_dkk_per_unit"]))
-    return {(m, c.strip().upper()): r for m, c, r in zip(fx["month"], fx["currency"], fx["rate"])}
+def clean_policies(policies, assets, fx, issues) -> pd.DataFrame:
+    policies = policies.copy()
+
+    # 1. Peril names come with mixed case and stray spaces ("FIRE", " fire").
+    normalised = policies["peril"].str.strip().str.lower()
+    changed = normalised != policies["peril"]
+    add_issue(issues, "policies", "peril with inconsistent case or spaces", "normalised", changed.sum())
+    policies["peril"] = normalised
+
+    # 2. Types.
+    policies["inception_date"] = pd.to_datetime(policies["inception_date"], format="%Y-%m-%d")
+    policies["expiry_date"] = pd.to_datetime(policies["expiry_date"], format="%Y-%m-%d")
+    policies["annual_premium"] = policies["annual_premium"].astype(float)
+    policies["underwriting_year"] = policies["inception_date"].dt.year
+
+    # 3. Portfolio, region and asset type come from the asset.
+    asset_columns = assets[["asset_id", "portfolio_id", "region", "asset_type"]]
+    policies = policies.merge(asset_columns, on="asset_id", how="left", validate="many_to_one")
+    if policies["portfolio_id"].isna().any():
+        raise ValueError("Some policies reference an asset_id that is not in assets")
+
+    # 4. Premium in DKK, at the rate of the inception month.
+    policies = add_dkk_rate(policies, "inception_date", fx)
+    policies["premium_dkk"] = policies["annual_premium"] * policies["rate_dkk_per_unit"]
+
+    return policies
 
 
-def _to_dkk(amount: pd.Series, currency: pd.Series, date: pd.Series, rates: dict) -> pd.Series:
-    """Convert at the month-end rate of the month the amount belongs to. NaN if no rate."""
-    keys = zip(date.dt.strftime("%Y-%m"), currency)
-    return amount * pd.Series([rates.get(k, float("nan")) for k in keys], index=amount.index)
+def clean_claims(claims, policies, fx, issues) -> pd.DataFrame:
+    claims = claims.copy()
+
+    # 1. Some dates are DD-MM-YYYY instead of ISO; parse both.
+    claims["loss_date"], loss_day_first = parse_dates(claims["loss_date"])
+    claims["reported_date"], reported_day_first = parse_dates(claims["reported_date"])
+    day_first = loss_day_first | reported_day_first
+    add_issue(issues, "claims", "date in DD-MM-YYYY format", "parsed as day-first", day_first.sum())
+
+    # 2. Incurred loss, by status. Withdrawn and declined claims cost nothing.
+    claims["paid_amount"] = claims["paid_amount"].astype(float)
+    claims["reserve_amount"] = claims["reserve_amount"].astype(float)
+    settled = claims["status"] == "settled"
+    is_open = claims["status"] == "open"
+    claims["incurred"] = 0.0
+    claims.loc[settled, "incurred"] = claims["paid_amount"]
+    claims.loc[is_open, "incurred"] = claims["paid_amount"] + claims["reserve_amount"]
+
+    settled_with_reserve = settled & (claims["reserve_amount"] > 0)
+    add_issue(issues, "claims", "settled claim still has a reserve",
+              "reserve ignored (settled = paid only)", settled_with_reserve.sum())
+
+    # 3. Incurred in DKK, in the claim's own currency, at the rate of the loss month.
+    claims = add_dkk_rate(claims, "loss_date", fx)
+    claims["incurred_dkk"] = claims["incurred"] * claims["rate_dkk_per_unit"]
+
+    # 4. Negative paid amounts: probably a sign error, but not ours to fix. Exclude.
+    negative = claims["paid_amount"] < 0
+    add_issue(issues, "claims", "negative paid_amount", "excluded (to confirm with data provider)",
+              negative.sum(), claims.loc[negative, "incurred_dkk"].abs().sum())
+    claims = claims[~negative]
+
+    # 5. Claims whose policy does not exist cannot be attributed to a portfolio.
+    orphan = ~claims["policy_id"].isin(policies["policy_id"])
+    add_issue(issues, "claims", "policy_id not in policies", "excluded",
+              orphan.sum(), claims.loc[orphan, "incurred_dkk"].sum())
+    claims = claims[~orphan]
+
+    # 6. Attach policy fields (one policy per claim).
+    policy_columns = policies[["policy_id", "portfolio_id", "peril", "region", "asset_type",
+                               "underwriting_year", "inception_date", "expiry_date"]]
+    claims = claims.merge(policy_columns, on="policy_id", how="inner", validate="many_to_one")
+
+    # 7. A policy cannot cover a loss outside its term.
+    outside = (claims["loss_date"] < claims["inception_date"]) | (claims["loss_date"] > claims["expiry_date"])
+    add_issue(issues, "claims", "loss date outside the policy term", "excluded",
+              outside.sum(), claims.loc[outside, "incurred_dkk"].sum())
+    claims = claims[~outside]
+
+    return claims.reset_index(drop=True)
 
 
-def _parse_dates(values: pd.Series) -> tuple[pd.Series, pd.Series]:
-    """Parse ISO dates, falling back to day-first DD-MM-YYYY. Returns (dates, was_day_first)."""
+def parse_dates(values: pd.Series) -> tuple[pd.Series, pd.Series]:
+    """Parse ISO dates, falling back to DD-MM-YYYY. Returns (dates, was_day_first)."""
     iso = pd.to_datetime(values, format="%Y-%m-%d", errors="coerce")
     day_first = pd.to_datetime(values, format="%d-%m-%Y", errors="coerce")
-    return iso.fillna(day_first), iso.isna() & day_first.notna()
+    dates = iso.fillna(day_first)
+    if dates.isna().any():
+        raise ValueError(f"Unparseable dates: {values[dates.isna()].tolist()[:5]}")
+    return dates, iso.isna()
 
 
-def _clean_policies(assets, policies, rates, record) -> pd.DataFrame:
-    p = policies.copy()
-
-    raw_peril = p["peril"]
-    p["peril"] = raw_peril.str.strip().str.lower()
-    record("policies", "peril with inconsistent case or whitespace", "normalised", p["peril"] != raw_peril)
-    p["currency"] = p["currency"].str.strip().str.upper()
-
-    dup = p.duplicated("policy_id", keep="first")
-    record("policies", "duplicate policy_id", "excluded (kept first)", dup)
-    p = p[~dup]
-
-    p["inception_date"], _ = _parse_dates(p["inception_date"])
-    p["expiry_date"], _ = _parse_dates(p["expiry_date"])
-    p["annual_premium"] = pd.to_numeric(p["annual_premium"], errors="coerce")
-    bad = p["inception_date"].isna() | p["expiry_date"].isna() | p["annual_premium"].isna()
-    record("policies", "unparseable date or premium", "excluded", bad)
-    p = p[~bad]
-
-    p = p.merge(assets[["asset_id", "portfolio_id", "region", "asset_type"]], on="asset_id", how="left")
-    orphan = p["portfolio_id"].isna()
-    record("policies", "asset_id not in assets", "excluded", orphan)
-    p = p[~orphan]
-
-    p["premium_dkk"] = _to_dkk(p["annual_premium"], p["currency"], p["inception_date"], rates)
-    no_rate = p["premium_dkk"].isna()
-    record("policies", "no FX rate for currency and inception month", "excluded", no_rate)
-    p = p[~no_rate]
-
-    p["underwriting_year"] = p["inception_date"].dt.year
-    return p.reset_index(drop=True)
+def add_dkk_rate(df: pd.DataFrame, date_column: str, fx: pd.DataFrame) -> pd.DataFrame:
+    """Add `rate_dkk_per_unit` for each row's currency and the month of `date_column`."""
+    df = df.copy()
+    df["month"] = df[date_column].dt.strftime("%Y-%m")
+    df = df.merge(fx, on=["month", "currency"], how="left")
+    if df["rate_dkk_per_unit"].isna().any():
+        raise ValueError(f"Missing FX rate for some rows (by {date_column})")
+    return df
 
 
-def _clean_claims(claims, policies, rates, record) -> pd.DataFrame:
-    c = claims.copy()
-    c["status"] = c["status"].str.strip().str.lower()
-    c["currency"] = c["currency"].str.strip().str.upper()
-
-    dup = c.duplicated("claim_id", keep="first")
-    record("claims", "duplicate claim_id", "excluded (kept first)", dup)
-    c = c[~dup]
-
-    c["loss_date"], day_first = _parse_dates(c["loss_date"])
-    c["reported_date"], day_first_rep = _parse_dates(c["reported_date"])
-    record("claims", "date in DD-MM-YYYY instead of ISO format", "parsed as day-first", day_first | day_first_rep)
-    c["paid_amount"] = pd.to_numeric(c["paid_amount"], errors="coerce")
-    c["reserve_amount"] = pd.to_numeric(c["reserve_amount"], errors="coerce")
-    bad = c["loss_date"].isna() | c["paid_amount"].isna() | c["reserve_amount"].isna()
-    record("claims", "unparseable date or amount", "excluded", bad)
-    c = c[~bad]
-
-    unknown = ~c["status"].isin(INCURRED_STATUSES | ZERO_COST_STATUSES)
-    record("claims", "unknown status", "excluded", unknown)
-    c = c[~unknown]
-
-    negative = c["paid_amount"] < 0
-    record("claims", "negative paid_amount (treated as sign error)", "used absolute value", negative)
-    c["paid_amount"] = c["paid_amount"].abs()
-
-    settled_reserve = (c["status"] == "settled") & (c["reserve_amount"] > 0)
-    record("claims", "settled claim with reserve left", "reserve ignored (settled = paid only)", settled_reserve)
-
-    c["incurred"] = 0.0
-    c.loc[c["status"] == "settled", "incurred"] = c["paid_amount"]
-    c.loc[c["status"] == "open", "incurred"] = c["paid_amount"] + c["reserve_amount"]
-    c["incurred_dkk"] = _to_dkk(c["incurred"], c["currency"], c["loss_date"], rates)
-    no_rate = c["incurred_dkk"].isna()
-    record("claims", "no FX rate for currency and loss month", "excluded", no_rate)
-    c = c[~no_rate]
-
-    policy_cols = ["policy_id", "portfolio_id", "peril", "region", "asset_type",
-                   "underwriting_year", "inception_date", "expiry_date"]
-    c = c.merge(policies[policy_cols], on="policy_id", how="left", validate="many_to_one")
-    orphan = c["portfolio_id"].isna()
-    record("claims", "policy_id not in (valid) policies", "excluded", orphan, c.loc[orphan, "incurred_dkk"].sum())
-    c = c[~orphan]
-
-    outside = (c["loss_date"] < c["inception_date"]) | (c["loss_date"] > c["expiry_date"])
-    record("claims", "loss date outside the policy term", "excluded", outside, c.loc[outside, "incurred_dkk"].sum())
-    c = c[~outside]
-
-    return c.reset_index(drop=True)
+def add_issue(issues, table, problem, action, rows, amount_dkk=None) -> None:
+    if rows == 0:
+        return
+    issue = {"table": table, "problem": problem, "action": action, "rows": int(rows)}
+    if amount_dkk is not None:
+        issue["amount_dkk"] = round(float(amount_dkk), 2)
+    issues.append(issue)

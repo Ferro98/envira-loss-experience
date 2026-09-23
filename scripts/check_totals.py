@@ -50,10 +50,10 @@ def independent_totals():
     for c in source_claims:
         loss = parse_date(c["loss_date"])
         policy = policies.get(c["policy_id"])
-        if policy is None or not (policy[1] <= loss <= policy[2]):
+        paid, reserve = float(c["paid_amount"]), float(c["reserve_amount"])
+        if paid < 0 or policy is None or not (policy[1] <= loss <= policy[2]):
             excluded += 1
             continue
-        paid, reserve = abs(float(c["paid_amount"])), float(c["reserve_amount"])
         amount = {"settled": paid, "open": paid + reserve}.get(c["status"], 0.0)
         incurred[policy[0]] += amount * fx[(loss.strftime("%Y-%m"), c["currency"])]
     return premium, incurred, len(source_claims), excluded

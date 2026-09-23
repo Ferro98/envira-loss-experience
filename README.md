@@ -55,17 +55,17 @@ Example: `curl http://localhost:8000/portfolios/PF-03/loss-experience`
 
 ## Data handling policy
 
-Applied once at startup in `app/data.py`; every row corrected or excluded is
-counted.
+Applied once at startup in `app/data.py`, in the order below; every row corrected
+or excluded is counted once, under the first rule that excludes it.
 
 | issue in source data | rows | handling |
 |---|---:|---|
 | peril with mixed case / stray whitespace (`FIRE`, `" fire"`) | 1,321 policies | normalised to lower case |
 | claim dates in `DD-MM-YYYY` instead of ISO | 1,072 claims | parsed as day-first (month-first fails to parse 654 and puts reports before losses) |
-| negative `paid_amount`, all on settled claims | 262 claims | treated as sign error, absolute value used |
+| negative `paid_amount`, all on settled claims | 262 claims, 4.1M DKK (absolute) | excluded; likely a sign error, but that is for the data provider to confirm |
 | settled claims that still carry a reserve | 721 claims | reserve ignored: settled incurred = paid |
 | claim `policy_id` not in `policies.csv` | 260 claims, 11.7M DKK | excluded: cannot be attributed to a portfolio |
-| loss date before the policy's inception | 310 claims, 5.3M DKK | excluded: the policy did not cover that date (almost all were also reported before inception) |
+| loss date before the policy's inception | 293 claims, 4.8M DKK | excluded: the policy did not cover that date (almost all were also reported before inception) |
 
 Currency: premiums are converted at the month-end rate of the inception month,
 claims at the rate of the loss month, each in its own currency (a policy's
