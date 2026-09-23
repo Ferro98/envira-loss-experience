@@ -91,5 +91,5 @@ withdrawn/declined. Claim count includes open and settled claims only.
 python scripts/check_totals.py
 ```
 
-Recomputes per-portfolio premium and incurred loss from the raw CSVs with the
-standard library only and compares them with the service output.
+Recomputes every figure of the core endpoint (per portfolio and peril) from the
+raw CSVs with the standard library only, and compares it with the service output.
