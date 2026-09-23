@@ -65,3 +65,10 @@ def test_portfolios_are_ordered_by_loss_ratio(client):
     ratios = [p["loss_ratio"] for p in body["portfolios"]]
     assert [p["portfolio_id"] for p in body["portfolios"]] == ["PF-01", "PF-02"]  # 674/1750 > 0/500
     assert ratios == sorted(ratios, reverse=True)
+
+
+def test_data_quality_reports_exclusions(client):
+    body = client.get("/data-quality").json()
+    assert body["claims_kept"] == 4  # C5 excluded: 5 claims in source
+    orphan = next(i for i in body["issues"] if i["problem"] == "policy_id not in policies")
+    assert orphan["rows"] == 1 and orphan["amount_dkk"] == 999.0

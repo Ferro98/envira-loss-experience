@@ -22,6 +22,12 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/data-quality")
+def data_quality() -> dict:
+    book = app.state.book
+    return {"policies_kept": len(book.policies), "claims_kept": len(book.claims), "issues": book.issues}
+
+
 @app.get("/portfolios/loss-experience")
 def portfolios_loss_experience() -> dict:
     return {"currency": "DKK", "ordered_by": "loss_ratio desc", "portfolios": compare_portfolios(app.state.book)}
