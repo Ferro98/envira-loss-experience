@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 
 from app.data import load_book
-from app.report import loss_experience
+from app.report import compare_portfolios, loss_experience
 
 
 @asynccontextmanager
@@ -20,6 +20,11 @@ app = FastAPI(title="Envira loss-experience service", lifespan=lifespan)
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/portfolios/loss-experience")
+def portfolios_loss_experience() -> dict:
+    return {"currency": "DKK", "ordered_by": "loss_ratio desc", "portfolios": compare_portfolios(app.state.book)}
 
 
 @app.get("/portfolios/{portfolio_id}/loss-experience")

@@ -59,6 +59,7 @@ pytest
 | method | path | what |
 |---|---|---|
 | GET | `/portfolios/{portfolio_id}/loss-experience` | per peril and in total: policy count, earned premium, incurred loss, loss ratio, claim count, largest single claim (DKK) |
+| GET | `/portfolios/loss-experience` | all portfolios with the same totals, ordered by loss ratio (worst first) |
 | GET | `/health` | liveness |
 
 Example: `curl http://localhost:8000/portfolios/PF-03/loss-experience`

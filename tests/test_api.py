@@ -58,3 +58,10 @@ def test_loss_experience_per_peril(client):
 
 def test_unknown_portfolio_returns_404(client):
     assert client.get("/portfolios/PF-99/loss-experience").status_code == 404
+
+
+def test_portfolios_are_ordered_by_loss_ratio(client):
+    body = client.get("/portfolios/loss-experience").json()
+    ratios = [p["loss_ratio"] for p in body["portfolios"]]
+    assert [p["portfolio_id"] for p in body["portfolios"]] == ["PF-01", "PF-02"]  # 674/1750 > 0/500
+    assert ratios == sorted(ratios, reverse=True)

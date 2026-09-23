@@ -23,6 +23,15 @@ def loss_experience(book: Book, portfolio_id: str) -> dict | None:
     }
 
 
+def compare_portfolios(book: Book) -> list[dict]:
+    rows = []
+    for portfolio_id in book.policies["portfolio_id"].unique():
+        total = loss_experience(book, portfolio_id)["total"]
+        rows.append({"portfolio_id": portfolio_id} | total)
+    # Worst first: loss ratio is comparable across portfolios of similar size.
+    return sorted(rows, key=lambda row: row["loss_ratio"], reverse=True)
+
+
 def _summarise(policies: pd.DataFrame, claims: pd.DataFrame) -> dict:
     premium = float(policies["premium_dkk"].sum())
     incurred = float(claims["incurred_dkk"].sum())
