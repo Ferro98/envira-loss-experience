@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 
 from app.data import load_book
-from app.report import compare_portfolios, loss_experience
+from app.report import compare_portfolios, filter_book, loss_experience
 
 
 @asynccontextmanager
@@ -29,13 +29,19 @@ def data_quality() -> dict:
 
 
 @app.get("/portfolios/loss-experience")
-def portfolios_loss_experience() -> dict:
-    return {"currency": "DKK", "ordered_by": "loss_ratio desc", "portfolios": compare_portfolios(app.state.book)}
+def portfolios_loss_experience(
+    underwriting_year: int | None = None, region: str | None = None, asset_type: str | None = None
+) -> dict:
+    book = filter_book(app.state.book, underwriting_year, region, asset_type)
+    return {"currency": "DKK", "ordered_by": "loss_ratio desc", "portfolios": compare_portfolios(book)}
 
 
 @app.get("/portfolios/{portfolio_id}/loss-experience")
-def portfolio_loss_experience(portfolio_id: str) -> dict:
-    result = loss_experience(app.state.book, portfolio_id)
+def portfolio_loss_experience(
+    portfolio_id: str, underwriting_year: int | None = None, region: str | None = None, asset_type: str | None = None
+) -> dict:
+    book = filter_book(app.state.book, underwriting_year, region, asset_type)
+    result = loss_experience(book, portfolio_id)
     if result is None:
-        raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found")
+        raise HTTPException(status_code=404, detail=f"No policies for portfolio {portfolio_id} with these filters")
     return result

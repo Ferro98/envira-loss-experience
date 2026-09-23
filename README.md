@@ -65,6 +65,11 @@ pytest
 
 Example: `curl http://localhost:8000/portfolios/PF-03/loss-experience`
 
+Both portfolio endpoints accept optional filters, combinable:
+`underwriting_year` (e.g. `2023`), `region` (e.g. `Hovedstaden`) and
+`asset_type` (e.g. `residential`); values match the source data exactly.
+Example: `/portfolios/loss-experience?underwriting_year=2024&region=Sjaelland`
+
 ## Data handling policy
 
 Applied once at startup in `app/data.py`, in the order below; every row corrected

@@ -5,6 +5,16 @@ import pandas as pd
 from app.data import Book
 
 
+def filter_book(book: Book, underwriting_year=None, region=None, asset_type=None) -> Book:
+    """Keep only policies (and their claims) matching the given filters; None means no filter."""
+    policies, claims = book.policies, book.claims
+    for column, value in [("underwriting_year", underwriting_year), ("region", region), ("asset_type", asset_type)]:
+        if value is not None:
+            policies = policies[policies[column] == value]
+            claims = claims[claims[column] == value]
+    return Book(policies=policies, claims=claims, issues=book.issues)
+
+
 def loss_experience(book: Book, portfolio_id: str) -> dict | None:
     policies = book.policies[book.policies["portfolio_id"] == portfolio_id]
     if policies.empty:
