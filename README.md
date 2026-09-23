@@ -7,7 +7,9 @@ loss ratio) per portfolio and peril, in DKK.
 
 Requires Python 3.13.
 
-Unzip the provided data so the CSV files sit in `./data`:
+The service reads the provided CSV files from `./data` in the repository root.
+The archive unpacks to `envira-loss-data/data/`: move that `data` folder to the
+repository root, so that you have:
 
 ```
 data/
@@ -97,8 +99,9 @@ withdrawn/declined. Claim count includes open and settled claims only.
 python scripts/check_totals.py
 ```
 
-Recomputes every figure of the core endpoint (per portfolio and peril) from the
-raw CSVs with the standard library only, and compares it with the service output.
+Recomputes every figure of the core endpoint (per portfolio and peril), unfiltered
+and for each filter value, from the raw CSVs with the standard library only, and
+compares it with the service output.
 
 ## What the numbers say
 
