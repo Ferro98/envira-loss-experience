@@ -3,13 +3,15 @@ Stopped:
 
 ## What I built
 
-- `GET /portfolios/{id}/loss-experience` (core) and `GET /portfolios/loss-experience`, ordered by loss ratio, worst first: it shows where pricing is wrong regardless of size, and portfolios are of similar size (882–1,072 policies). Ranking by absolute result (premium − loss) gives the same top 7 and the same last.
-- An explicit data policy (see README): 815 of 4,509 claims excluded and reported, never dropped silently.
-- Verification: `scripts/check_totals.py` recomputes every figure independently and matches the service. It checks the implementation, not the policy choices, which I checked against the data separately. Tests cover each data rule; Docker compose to run it.
+- `GET /portfolios/{id}/loss-experience` (core) and `GET /portfolios/loss-experience`, ordered by loss ratio, worst first: it shows where pricing is wrong regardless of size, and portfolios are of similar size (882–1,072 policies). Ranking by absolute result (premium − loss) gives the same top 7 and the same last. Both accept filters by underwriting year, region and asset type.
+- An explicit data policy (see README): 815 of 4,509 claims excluded and reported via `GET /data-quality`, never dropped silently.
+- Verification: `scripts/check_totals.py` recomputes every figure independently, unfiltered and for each filter value, and matches the service. It checks the implementation, not the policy choices, which I checked against the data separately. Tests cover each data rule; Docker compose to run it.
 
 ## What I deliberately did not build, and why
 
 - No database: ~20k rows are loaded once at startup, so a DB adds infrastructure without changing any answer.
+- No web page for non-technical users: the service's `/docs` page already lets anyone pick a portfolio and see the answer; a real page is UI work that changes no figure, so I spent the time on filters and verification instead.
+- No branches or pull requests: for a two-hour solo exercise I committed straight to `main`. In a real project each change would go on a feature branch and reach `main` through a reviewed pull request with CI.
 
 ## What I would do first with another day
 
