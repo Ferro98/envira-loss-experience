@@ -1,0 +1,12 @@
+# Source data is provided separately and must not be committed
+data/
+
+# Test brief (not ours to publish)
+BRIEF.md
+SCORING.md
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
