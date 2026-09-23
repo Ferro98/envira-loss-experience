@@ -38,6 +38,16 @@ uvicorn app.main:app --port 8000
 
 Then open http://localhost:8000/docs.
 
+## Run with Docker
+
+With the data in `./data` (mounted read-only into the container):
+
+```bash
+docker compose up --build
+```
+
+The service listens on http://localhost:8000.
+
 ## Test
 
 ```bash
