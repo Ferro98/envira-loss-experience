@@ -93,3 +93,10 @@ python scripts/check_totals.py
 
 Recomputes every figure of the core endpoint (per portfolio and peril) from the
 raw CSVs with the standard library only, and compares it with the service output.
+
+## What the numbers say
+
+No portfolio loses money on claims overall (highest loss ratio: PF-03, 0.91),
+but fire does: its loss ratio is above 1 in 11 of 12 portfolios (1.58 across
+the book, 3.15 in PF-03). Subsidence is above 1 in 3 portfolios. Loss ratios
+exclude expenses, so a ratio near 1 is already unprofitable.
